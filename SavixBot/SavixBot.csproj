@@ -61,6 +61,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="GiveawayItem.cs" />
     <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -69,8 +70,11 @@
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Whitelist.cs" />
+    <Compile Include="User.cs" />
     <Compile Include="SavixBot.cs" />
+    <Compile Include="UserController.cs" />
+    <Compile Include="WFGiveaway.cs" />
+    <Compile Include="WFWhitelist.cs" />
     <Compile Include="WhitelistItem.cs" />
     <EmbeddedResource Include="MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>

@@ -4,18 +4,12 @@ using System.Linq;
 
 namespace SavixBot
 {
+    public enum WhiteListStateEnum { zero, wait_for_start, wait_for_address, wait_for_amount, wait_for_terms, wait_for_approval, approved};
     public class WhitelistItem
     {
-        public long Id { get; set; }
-        public string Username { get; set; }
-        public string FirstName { get; set; }
-        public string LastName { get; set; }
         public string EthAddress { get; set; }
         public string EthBalance { get; set; }
         public double Contribution { get; set; }
-        public string LanguageCode { get; set; }
-        public DateTime FirstMessageDate { get; set; }
-        public DateTime LastMessageDate { get; set; }
 
         WhiteListStateEnum state;
         public WhiteListStateEnum State
@@ -26,12 +20,10 @@ namespace SavixBot
             }
             set
             {
-                Whitelist.HasChanged = true;
+                UserController.HasChanged = true;
                 state = value;
             }
         }
-
-        public List<string> ChatProtocol { get; set; }
 
     }
 }

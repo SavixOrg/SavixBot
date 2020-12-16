@@ -1,6 +1,7 @@
 ﻿using Argos.Base.Web;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -11,16 +12,11 @@ namespace SavixBot
 {
     public static class SavixBot
     {
-        static string key = "*";
-        static TelegramBotClient bot = new TelegramBotClient(key);
-
-        const double MIN_CONTRIBUTION = 0.5;
-        const double MAX_CONTRIBUTION = 10;
+        static TelegramBotClient bot;
 
         static public bool Paused = false;
 
         static Char lf = (char)10;
-
 
         private static bool IsMember(int userId, long chatId)
         {
@@ -30,211 +26,14 @@ namespace SavixBot
             return true;
         }
 
-        public static string VerifyEthAddress(string addr)
+        public static async Task StartBot()
         {
-            HttpParameter param = new HttpParameter();
-            param.Url = "https://etherscan.io/address/" + addr;
-            var result = HttpClient.GetPage(param);
-
-            Regex rx = new Regex(@"\d+(<b>.</b>\d+)?\sEther");
-
-            Regex rxInvalid = new Regex(@"Ethereum\sAccount\s\(Invalid\sAddress\)");
-            if (rxInvalid.IsMatch(result.RawData))
-                return null;
-
-            if (rx.IsMatch(result.RawData))
-                return rx.Match(result.RawData).Value.Replace("<b>", "").Replace("</b>", "").Replace("Ether", "").Trim();
-
-            return null;
-        }
-
-        static async public void SendMessage(long chatId, WhitelistItem item, string text)
-        {
-            if (item != null)
-                item.ChatProtocol.Add("bot: " + text);
-            await bot.SendTextMessageAsync((Telegram.Bot.Types.ChatId)chatId, text, Telegram.Bot.Types.Enums.ParseMode.Html);
-        }
-
-        static async void SendMessage(Telegram.Bot.Types.Message message, WhitelistItem chat, string text)
-        {
-            if (chat != null)
-                chat.ChatProtocol.Add("bot: " + text);
-            await bot.SendTextMessageAsync(message.Chat, text, Telegram.Bot.Types.Enums.ParseMode.Html);
-        }
-
-
-        static void ProcessStateZero(WhitelistItem chat, Telegram.Bot.Types.Message message)
-        {
-            if (message.Text.ToLower() == "/start")
-            {
-                SendMessage(message, chat, "Please enter your ETH address that you will be sending the funds from (format 0x)");
-                chat.State = WhiteListStateEnum.wait_for_address;
-            }
-            else
-            {
-                SendMessage(message, chat, "Please enter /start to begin the whitelist procedure");
-            }
-            return;
-        }
-
-        static void ProcessStateWaitForAddress(WhitelistItem chat, Telegram.Bot.Types.Message message)
-        {
-            string msg = message.Text.Trim();
-            if (!msg.StartsWith("0x"))
-            {
-                SendMessage(message, chat, "Your ETH address must start with 0x, please try again...");
-                return;
-            }
-            else if (msg.Length != 42)
-            {
-                SendMessage(message, chat, "Wrong length of ETH address, please try again...");
-                return;
-            }
-
-            SendMessage(message, chat, "Verifying your ETH address on the blockchain (can take a few seconds)");
-            string value = VerifyEthAddress(msg);
-            if (value == null)
-            {
-                SendMessage(message, chat, "Unknown or Invalid ETH address, please try again...");
-            }
-
-            chat.EthAddress = msg;
-            chat.EthBalance = value;
-            chat.State = WhiteListStateEnum.wait_for_amount;
-            SendMessage(message, chat, String.Format("How much ETH do you want to contribute ?"+lf+"(0.5 ETH minimum, 10 ETH maximum)", message.Chat.FirstName));
-            return;
-        }
-
-        static void ProcessStateWaitForAmount(WhitelistItem chat, Telegram.Bot.Types.Message message)
-        {
-            string msg = message.Text.Trim().Replace(".",",");
-            double amount = 0;
-            try
-            {
-                amount = Convert.ToDouble(msg);
-            }
-            catch (Exception e)
-            {
-                SendMessage(message, chat, "Incorrect number format, please try again...");
-                SendMessage(message, chat, String.Format("How much ETH do you want to contribute ?"+lf+"(0.5 ETH minimum, 10 ETH maximum)", message.Chat.FirstName));
-                return;
-            }
-            if (amount < MIN_CONTRIBUTION)
-            {
-                SendMessage(message, chat, "That's not enough, minimum is 0.5 ETH");
-                return;
-            }
-            else if (amount > MAX_CONTRIBUTION)
-            {
-                SendMessage(message, chat, "That's too much, maximum is 10 ETH");
-                return;
-            }
-
-            chat.Contribution = amount;
-            chat.State = WhiteListStateEnum.wait_for_terms;
-            SendMessage(message, chat, @"Please type <b>yes</b> if you agree to our <a href=""https://savix.org/terms"">Terms and Conditions</a>");
-            return;
-        }
-
-        static void ProcessStateWaitForTerms(WhitelistItem chat, Telegram.Bot.Types.Message message)
-        {
-            string msg = message.Text.Trim().ToLower();
-            if (msg == "no")
-            {
-                chat.State = WhiteListStateEnum.zero;
-                chat.EthAddress = null;
-                chat.Contribution = 0;
-                chat.EthBalance = null;
-                SendMessage(message, chat, "Sorry to hear that, if you want, you can restart the whitelist process at any time.");
-                return;
-            }
-            else if (msg != "yes")
-            {
-                SendMessage(message, chat, @"Please type <b>yes</b> if you agree to our <a href=""https://savix.org/terms"">Terms and Conditions</a>");
-                return;
-            }
-
-            chat.State = WhiteListStateEnum.wait_for_approval;
-            SendMessage(message, chat, String.Format("Thanks {0}, whitelist application successful."+lf+"I will send you a message after your approval", message.Chat.FirstName));
-            return;
-        }
-
-        static void ProcessStateWaitForApproval(WhitelistItem chat, Telegram.Bot.Types.Message message)
-        {
-            SendMessage(message, chat, "Your whitelist approval is pending"+lf+"Please be patient, i will send you a message");
-        }
-
-        static void ProcessStateApproved(WhitelistItem chat, Telegram.Bot.Types.Message message)
-        {
-            SavixBot.SendMessage(message, chat, "Your whitelist application got approved."+lf+"You are ready to participate in the presale."+lf+"Kindly head over to our <a href=\"http://savix.org/presale\">Presale DApp</a> to contribute");
-        }
-
-        static void BotClient_OnMessage(object sender, Telegram.Bot.Args.MessageEventArgs e)
-        {
-            // ignore other bots
-            if (e.Message.From.IsBot)
-                return;
-
-            if (Paused)
-            {
-                SendMessage(e.Message, null, "Bot is in pause mode, please try again later...");
-                return;
-            }
-
-            if (String.IsNullOrEmpty(e.Message.From.Username))
-            {
-                SendMessage(e.Message, null, "Please set a username to use this bot!"+lf+"Go to Settings > Edit Profile > Set Username");
-                return;
-            }
-
-            if (e.Message.Text != null)
-            {
-                try
-                {
-                    if (!IsMember(e.Message.From.Id, -1001389305639))
-                    {
-                        SendMessage(e.Message, null, "You must be a member of the Savix channel (@savixhq) to continue"+lf+"Please join....");
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    SendMessage(e.Message, null, "Error: " + ex.Message + lf+ "Please try again...");
-                    return;
-                }
-
-                WhitelistItem chat = Whitelist.GetOrAddItem(e.Message.Chat.Id, e.Message.Chat.FirstName, e.Message.Chat.LastName,
-                        e.Message.Date, e.Message.Chat.Username, e.Message.From.LanguageCode);
-
-                chat.ChatProtocol.Add(e.Message.Text);
-                switch (chat.State)
-                {
-                    case WhiteListStateEnum.zero:
-                        ProcessStateZero(chat, e.Message);
-                        break;
-                    case WhiteListStateEnum.wait_for_address:
-                        ProcessStateWaitForAddress(chat, e.Message);
-                        break;
-                    case WhiteListStateEnum.wait_for_amount:
-                        ProcessStateWaitForAmount(chat, e.Message);
-                        break;
-                    case WhiteListStateEnum.wait_for_terms:
-                        ProcessStateWaitForTerms(chat, e.Message);
-                        break;
-                    case WhiteListStateEnum.wait_for_approval:
-                        ProcessStateWaitForApproval(chat, e.Message);
-                        break;
-                    case WhiteListStateEnum.approved:
-                        ProcessStateApproved(chat, e.Message);
-                        break;
-                }
-            }
-        }
-
-        public static void StartBot()
-        {
+            string key = File.ReadAllText("key.txt").Trim();
+            bot = new TelegramBotClient(key);
+            Workflow.SetBot(bot);
             bot.OnMessage += BotClient_OnMessage;
             bot.OnUpdate += Bot_OnUpdate;
+            var me = await bot.GetMeAsync();
             bot.StartReceiving();
         }
 
@@ -254,8 +53,180 @@ namespace SavixBot
             {
                 if (DateTime.Now > lastWhitelistMsgDate.AddMinutes(3))
                 {
-                    bot.SendTextMessageAsync(e.Update.ChannelPost.Chat, "in order to join our presale you have to chat with @SavixRobot and type /start to begin whitelist procedure", Telegram.Bot.Types.Enums.ParseMode.Html);
+                    //bot.SendTextMessageAsync(e.Update.ChannelPost.Chat, "in order to join our presale you have to chat with @SavixRobot and type /start to begin whitelist procedure", Telegram.Bot.Types.Enums.ParseMode.Html);
+                    bot.SendTextMessageAsync(e.Update.ChannelPost.Chat, "our whitelist procedure for the presale will start soon, please watch for the relevant announcement", Telegram.Bot.Types.Enums.ParseMode.Html);
                     lastWhitelistMsgDate = DateTime.Now;
+                }
+            }
+        }
+
+
+        static void ParseCommand(User user, Telegram.Bot.Args.MessageEventArgs e)
+        {
+            switch (e.Message.Text.ToLower())
+            {
+                case "/ann":
+                    if (e.Message.From.Username == "mcopper" || e.Message.From.Username == "Anatol93" || e.Message.From.Username == "novaoffice")
+                        SendANN();
+                    break;
+                case "/start":
+                    WFWhitelist.DoWhitelist(user, e);
+                    break;
+                case "/giveaway":
+                    WFGiveaway.DoGiveaway(user, e);
+                    break;
+                default:
+                    // print commands
+                    break;
+            }
+        }
+
+        public static void DoChannelMessage(Telegram.Bot.Args.MessageEventArgs e)
+        {
+            if (e.Message == null || e.Message.Text == null)
+                return;
+
+            if (e.Message.Text.Contains("presale") || e.Message.Text.Contains("whitelist"))
+            {
+                if (DateTime.Now > lastWhitelistMsgDate.AddMinutes(3))
+                {
+                    //bot.SendTextMessageAsync(e.Update.ChannelPost.Chat, "in order to join our presale you have to chat with @SavixRobot and type /start to begin whitelist procedure", Telegram.Bot.Types.Enums.ParseMode.Html);
+                    Workflow.SendMessage(e.Message, null, "our whitelist procedure for the presale will start soon, please watch for the relevant announcement");
+                    lastWhitelistMsgDate = DateTime.Now;
+                }
+            }
+            // message from group
+            return;
+        }
+
+        public static bool CheckMembership(long groupId, Telegram.Bot.Args.MessageEventArgs e)
+        {
+            try
+            {
+                if (!IsMember(e.Message.From.Id, -1001354512306))
+                {
+                    Workflow.SendMessage(e.Message, null, "You must be a member of the Savix group (@savix_org) to continue" + lf + "Please join....");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Workflow.SendMessage(e.Message, null, "Error: " + ex.Message + lf + "Please try again...");
+                return false;
+            }
+            return true;
+        }
+
+        public static void SendANN()
+        {
+            string cap = "‼️ Our first **GIVEAWAY** just started ‼️" + lf + lf +
+                         "⚡️ We airdrop **250 SVX** (**7500$** estimated value)" + lf +
+                         "⚡️ **0.5 SVX (15$)** for each participant." + lf + lf +
+                         "⚡️ Only **" + (WFGiveaway.MaxCount-WFGiveaway.Count).ToString() + "/" + WFGiveaway.MaxCount + "** spots left !" + lf + lf +
+                        "🔹 **You need a TWITTER and DISCORD account**" + lf +
+                        "🔹 **And complete 3 simple tasks to participate.**" + lf + lf +
+                        "👉 To Begin: Start a conversation with @SavixRobot" + lf+
+                        "👉 then type /giveaway" + lf;
+
+            //Workflow.SendImage(-482596285, "https://savix.org/wp-content/uploads/2020/11/savix_giveaway2.jpg", cap);
+            Workflow.SendImage(-1001354512306, "https://savix.org/wp-content/uploads/2020/11/savix_giveaway2.jpg", cap);
+        }
+
+        static void ProcessGroupMessage(Telegram.Bot.Args.MessageEventArgs e)
+        {   // test group -482596285
+            if (e.Message.Text.ToLower().StartsWith("/ann"))
+            {
+                if (e.Message.From.Username == "mcopper" || e.Message.From.Username == "Anatol93" || e.Message.From.Username == "novaoffice")
+                {
+                    SendANN();
+                }
+            }
+            switch (e.Message.Text)
+            {
+                case "/giveaway@SavixRobot":
+                    if (String.IsNullOrEmpty(e.Message.From.Username))
+                    {
+                        Workflow.SendMessage(e.Message, null, "Please set a username to use this bot!" + lf + "Go to Settings > Edit Profile > Set Username");
+                        return;
+                    }
+                    WFGiveaway.DoGiveaway(UserController.GetOrAddItem(e.Message.From.Id, e.Message.From.FirstName, e.Message.From.LastName,
+                    e.Message.Date, e.Message.From.Username, e.Message.From.LanguageCode), e);
+                    break;
+                case "/start@SavixRobot":
+                    if (String.IsNullOrEmpty(e.Message.From.Username))
+                    {
+                        Workflow.SendMessage(e.Message, null, "Please set a username to use this bot!" + lf + "Go to Settings > Edit Profile > Set Username");
+                        return;
+                    }
+                    WFWhitelist.DoWhitelist(UserController.GetOrAddItem(e.Message.From.Id, e.Message.From.FirstName, e.Message.From.LastName,
+                    e.Message.Date, e.Message.From.Username, e.Message.From.LanguageCode), e);
+                    break;
+            }
+        }
+
+        static void BotClient_OnMessage(object sender, Telegram.Bot.Args.MessageEventArgs e)
+        {
+            // ignore other bots
+            if (e.Message.From.IsBot)
+                return;
+
+            if (Paused)
+            {
+                Workflow.SendMessage(e.Message, null, "Bot is in maintenance mode, please try again later...");
+                return;
+            }
+
+            if (e.Message.Text == null)
+                return;
+
+            try
+            {
+                if (!IsMember(e.Message.From.Id, -1001354512306))
+                {
+                    Workflow.SendMessage(e.Message, null, "You must be a member of the Savix group (@savix_org) to continue" + lf + "Please join....");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Workflow.SendMessage(e.Message, null, "Error: " + ex.Message + lf + "Please try again...");
+                return;
+            }
+            
+            if (e.Message.Chat.Type == Telegram.Bot.Types.Enums.ChatType.Group || e.Message.Chat.Type == Telegram.Bot.Types.Enums.ChatType.Supergroup)
+            {
+                ProcessGroupMessage(e);
+                return;
+            }
+
+            if (String.IsNullOrEmpty(e.Message.From.Username))
+            {
+                Workflow.SendMessage(e.Message, null, "Please set a username to use this bot!" + lf + "Go to Settings > Edit Profile > Set Username");
+                return;
+            }
+
+            User user = UserController.GetOrAddItem(e.Message.Chat.Id, e.Message.Chat.FirstName, e.Message.Chat.LastName,
+                    e.Message.Date, e.Message.Chat.Username, e.Message.From.LanguageCode);
+
+            user.ChatProtocol.Add(e.Message.Text);
+
+                       
+            if (e.Message.Text.StartsWith("/"))
+            {
+                ParseCommand(user, e);
+            }
+            else
+            {
+                switch (user.Workflow)
+                {
+                    case "whitelist":
+                        WFWhitelist.DoWhitelist(user, e);
+                        break;
+                    case "giveaway":
+                        WFGiveaway.DoGiveaway(user, e);
+                        break;
+                    default:
+                        break;
                 }
             }
         }
